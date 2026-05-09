@@ -264,11 +264,45 @@ let currentTab = 'table';
 let pointsTableCache = {}; // seriesId -> groups
 let chartInstance = null;
 
-// ── Fetch helper ─────────────────────────────────────────────────
-async function api(path) {
+// ── Fetch helper with localStorage cache (stale-while-revalidate) ─
+const LC_PREFIX = 'bcs_';
+const LC_TTL = {
+  series:       24 * 60 * 60 * 1000,
+  'points-table': 30 * 60 * 1000,
+  matches:       30 * 60 * 1000,
+  schedule:      30 * 60 * 1000,
+  'team-matches': 30 * 60 * 1000,
+  'player-stats': 30 * 60 * 1000,
+};
+function lcKey(path)  { return LC_PREFIX + path; }
+function lcTtl(path)  {
+  const seg = path.replace(/^\/api\//, '').split('?')[0];
+  return LC_TTL[seg] ?? 30 * 60 * 1000;
+}
+function lcGet(path) {
+  try {
+    const raw = localStorage.getItem(lcKey(path));
+    if (!raw) return null;
+    const { d, ts } = JSON.parse(raw);
+    return Date.now() - ts < lcTtl(path) ? d : null;
+  } catch { return null; }
+}
+function lcSet(path, d) {
+  try { localStorage.setItem(lcKey(path), JSON.stringify({ d, ts: Date.now() })); } catch {}
+}
+
+async function api(path, { revalidate = true } = {}) {
+  const cached = lcGet(path);
+  if (cached) {
+    // Return stale data immediately; refresh in background
+    if (revalidate) fetch(path).then(r => r.ok ? r.json() : null).then(d => d && lcSet(path, d)).catch(() => {});
+    return cached;
+  }
   const r = await fetch(path);
   if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  const d = await r.json();
+  lcSet(path, d);
+  return d;
 }
 
 // ── Init ─────────────────────────────────────────────────────────

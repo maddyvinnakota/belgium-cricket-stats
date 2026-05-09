@@ -17,9 +17,21 @@ const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── Simple TTL cache ──────────────────────────────────────────────
+// ── TTL cache with per-key durations ─────────────────────────────
+const TTL = {
+  series:  24 * 60 * 60 * 1000,  // 24 h  — series list almost never changes
+  rules:    6 * 60 * 60 * 1000,  //  6 h  — points rules fixed for the season
+  pt:      30 * 60 * 1000,       // 30 min — points table updates after matches
+  ml:      30 * 60 * 1000,       // 30 min — match list
+  tm:      30 * 60 * 1000,       // 30 min — per-team match points
+  ps:      30 * 60 * 1000,       // 30 min — player stats
+};
+function ttlFor(k) {
+  const prefix = k.split('_')[0];
+  return TTL[prefix] ?? 30 * 60 * 1000;
+}
 const _cache = new Map();
-function cGet(k)      { const e = _cache.get(k); return e && Date.now()-e.ts < 5*60*1000 ? e.d : null; }
+function cGet(k)      { const e = _cache.get(k); return e && Date.now()-e.ts < ttlFor(k) ? e.d : null; }
 function cSet(k, d)   { _cache.set(k, { d, ts: Date.now() }); return d; }
 async function cached(k, fn) { return cGet(k) ?? cSet(k, await fn()); }
 
@@ -32,6 +44,12 @@ function handle(fn) {
       res.status(500).json({ error: e.message });
     }
   };
+}
+
+// Send cache-control header matching our server-side TTL
+function setCacheHeader(res, cacheKey) {
+  const secs = Math.floor(ttlFor(cacheKey) / 1000);
+  res.set('Cache-Control', `public, max-age=${secs}, stale-while-revalidate=${secs * 2}`);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -51,6 +69,7 @@ app.get('/api/series', handle(async (req, res) => {
       seriesId: d.seriesId, name: d.name, status: d.seriesStatus,
     })),
   }));
+  setCacheHeader(res, 'series');
   res.json(series);
 }));
 
@@ -111,6 +130,7 @@ app.get('/api/points-table', handle(async (req, res) => {
     }).map((t, i) => ({ ...t, rank: i + 1 })),
   }));
 
+  setCacheHeader(res, `pt_${seriesId}`);
   res.json(groups);
 }));
 
@@ -161,6 +181,7 @@ app.get('/api/matches', handle(async (req, res) => {
   const rules = await cached(`rules_${seriesId}`, () => fetchSeriesRules(seriesId))
     .catch(() => ({ winPoints: 2, lossPoints: 0, tiePoints: 1, abandonedPoints: 1 }));
 
+  setCacheHeader(res, `ml_${seriesId}`);
   res.json({ matches, rules });
 }));
 
@@ -190,6 +211,7 @@ app.get('/api/schedule', handle(async (req, res) => {
         { ...base, team: m.teamTwo?.name ?? '', opponent: m.teamOne?.name ?? '' },
       ];
     });
+  setCacheHeader(res, `ml_${seriesId}`);
   res.json(schedule);
 }));
 
@@ -201,6 +223,7 @@ app.get('/api/player-stats', handle(async (req, res) => {
   if (!seriesId) return res.status(400).json({ error: 'seriesId required' });
 
   const raw = await cached(`ps_${seriesId}`, () => fetchPlayerStats(seriesId));
+  setCacheHeader(res, `ps_${seriesId}`);
   res.json(raw);
 }));
 
@@ -231,6 +254,7 @@ app.get('/api/team-matches', handle(async (req, res) => {
     result:             m.scoreSummary?.result ?? m.result ?? '',
   }));
 
+  setCacheHeader(res, `tm_${seriesId}_${teamId}`);
   res.json(matches);
 }));
 
