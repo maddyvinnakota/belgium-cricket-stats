@@ -325,8 +325,9 @@ async function init() {
     `<option value="${i}">${s.name} (${s.year}) ${s.status==='ONGOING'?'●':s.status==='UPCOMING'?'◆':'✓'}</option>`
   ).join('');
 
-  // Default: first ONGOING
-  const defIdx = allSeries.findIndex(s => s.status === 'ONGOING');
+  // Default: T20 CUP ONGOING, else first ONGOING
+  let defIdx = allSeries.findIndex(s => s.status === 'ONGOING' && /t20.cup/i.test(s.name));
+  if (defIdx < 0) defIdx = allSeries.findIndex(s => s.status === 'ONGOING');
   sel.value = defIdx >= 0 ? defIdx : 0;
   await onSeriesChange();
 }
@@ -459,8 +460,7 @@ function renderTable(groups) {
                     : `<div class="tm-init" style="background:${color}">${(t.team||'?').slice(0,2).toUpperCase()}</div>`
                   }
                   <div>
-                    <div class="team-name">${t.team}</div>
-                    ${t.code ? `<div class="team-code">${t.code}</div>` : ''}
+                    <div class="team-name">${teamLabel(t)}</div>
                   </div>
                 </div>
               </td>
@@ -657,7 +657,7 @@ function renderSummary(groups, allMatches, rules, exactPtsMap = {}) {
                   <div class="team-cell">
                     ${t.logo?`<img src="${t.logo}" class="tm-logo" onerror="this.style.display='none'">`
                             :`<div class="tm-init" style="background:${color}">${(t.team||'?').slice(0,2).toUpperCase()}</div>`}
-                    <span style="font-weight:600;font-size:12px">${t.team}</span>
+                    <span style="font-weight:600;font-size:12px">${teamLabel(t)}</span>
                   </div>
                 </td>
                 ${cols.map(i => {
@@ -733,7 +733,7 @@ function buildChart(groups) {
 
   const labels = Array.from({length:maxM+1},(_,i)=>i);
   const datasets = teams.map((t,i) => ({
-    label: t.team,
+    label: teamLabel(t),
     data:  cum[t.team] ?? [0],
     borderColor: TEAM_COLORS[i%TEAM_COLORS.length],
     backgroundColor: TEAM_COLORS[i%TEAM_COLORS.length],
@@ -776,7 +776,7 @@ function buildChart(groups) {
     legendEl.innerHTML = teams.map((t,i) =>
       `<button class="legend-btn" id="lb-${i}" onclick="toggleLine(${i})">
         <span class="legend-dot" style="background:${TEAM_COLORS[i%TEAM_COLORS.length]}"></span>
-        ${t.team}
+        ${teamLabel(t)}
       </button>`
     ).join('');
   }
@@ -850,7 +850,7 @@ function renderSchedule(schedule, groups) {
             <div class="team-cell" style="width:200px;flex-shrink:0">
               ${t.logo?`<img src="${t.logo}" class="tm-logo" onerror="this.style.display='none'">`
                       :`<div class="tm-init" style="background:${color}">${(t.team||'?').slice(0,2).toUpperCase()}</div>`}
-              <span style="font-weight:600">${t.team}</span>
+              <span style="font-weight:600">${teamLabel(t)}</span>
             </div>
             <div style="flex:1;display:flex;gap:3px;flex-wrap:wrap">${badges||'<span style="color:#9ca3af;font-size:12px">No matches yet</span>'}</div>
             <div style="font-size:12px;color:#6b7280;min-width:60px;text-align:right">${t.m>0?`${t.w}W ${t.l}L`:''}</div>
@@ -869,6 +869,11 @@ function renderSchedule(schedule, groups) {
   </div>`;
 
   return html;
+}
+
+// Returns "ABC Team Full Name" — code prefix if available
+function teamLabel(t) {
+  return t.code ? `${t.code} ${t.team}` : t.team;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
